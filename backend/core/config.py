@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     # --- LLM Configuration ---------------------------------------------------
 
     LLM_PROVIDER: Literal["openai", "anthropic"] = "openai"
-    LLM_MODEL: str = "gpt-5.2"
+    LLM_MODEL: str = "gpt-5.4-mini"
     LLM_MAX_TOKENS: int = 2048
     LLM_TEMPERATURE: float = 0.1
 
