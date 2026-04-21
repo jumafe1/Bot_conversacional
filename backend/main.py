@@ -56,24 +56,23 @@ app.include_router(api_router, prefix="/api/v1")
 
 @app.on_event("startup")
 async def startup_event() -> None:
-    """Initialize resources on application startup.
+    """Initialize DuckDB and register parquet views."""
+    from backend.repositories.database import db
 
-    TODO:
-        - Initialize DuckDB connection and register parquet views.
-        - Validate that processed parquet files exist and are readable.
-        - Log startup configuration summary.
-    """
-    logger.info("Starting Rappi Bot API", extra={"provider": settings.LLM_PROVIDER})
+    db.connect()
+    logger.info(
+        "Rappi Bot API started",
+        extra={"provider": settings.LLM_PROVIDER, "model": settings.LLM_MODEL},
+    )
 
 
 @app.on_event("shutdown")
 async def shutdown_event() -> None:
-    """Release resources on application shutdown.
+    """Close DuckDB connection gracefully."""
+    from backend.repositories.database import db
 
-    TODO:
-        - Close DuckDB connection gracefully.
-    """
-    logger.info("Shutting down Rappi Bot API")
+    db.close()
+    logger.info("Rappi Bot API shut down")
 
 
 # ---------------------------------------------------------------------------

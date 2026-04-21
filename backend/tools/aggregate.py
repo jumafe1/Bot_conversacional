@@ -1,35 +1,86 @@
 """
 Tool: aggregate
 
-Computes aggregate statistics (avg, min, max, sum, count) of a metric
-grouped by a dimension. Called for queries like "average Perfect Orders by country"
-or "top 5 zones by Turbo Adoption".
+Thin wrapper around ``metrics_repository.aggregate_metric``.
 
-Expected arguments:
-    metric   : str
-    agg_func : "avg" | "min" | "max" | "sum" | "count"
-    group_by : str
-    top_n    : int | None
-    period   : str | None
+Use for **summary statistics** on a single metric, optionally grouped by a
+dimension. Examples: "Average Perfect Orders across all zones", "Median
+Turbo Adoption by country", "Max Gross Profit UE by city".
 
-Returns:
-    list[dict] — one row per group: {group_value, agg_func, value, count}.
-
-TODO:
-    1. Map agg_func string to SQL aggregate function.
-    2. Call MetricsRepository.get_metric_aggregation().
-    3. If top_n is set, limit results to top_n rows sorted descending.
-    4. Return as list[dict].
+If no ``group_by`` is supplied, returns a single global aggregate row.
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+from backend.repositories.metrics_repository import aggregate_metric
+from backend.tools._caveats import (
+    detect_small_groups,
+    detect_small_sample,
+    merge,
+)
+from backend.tools._utils import empty_response, error_response, format_response
 
-async def handle(arguments: dict[str, Any]) -> list[dict]:
-    """Execute the aggregate tool.
+logger = logging.getLogger(__name__)
 
-    TODO: implement as described in the module docstring.
+
+def handle(arguments: dict[str, Any]) -> dict:
+    """Aggregate (mean, median, sum, min, max, count) a metric with optional grouping.
+
+    Expected arguments:
+        metric: str                                                   (required)
+        agg: "mean" | "median" | "sum" | "min" | "max" | "count" = "mean"
+        group_by: "country" | "city" | "zone_type" | "zone_prioritization" | None
+        week: str = "L0W_ROLL"
     """
-    raise NotImplementedError
+    metric = arguments.get("metric")
+    if not metric:
+        return error_response("Missing required argument 'metric'.")
+
+    agg = arguments.get("agg", "mean")
+    group_by = arguments.get("group_by")  # None => global aggregate
+    week = arguments.get("week", "L0W_ROLL")
+
+    try:
+        df = aggregate_metric(
+            metric,
+            agg=agg,
+            group_by=group_by,
+            week=week,
+        )
+    except ValueError as exc:
+        return error_response(exc)
+
+    if df.empty:
+        reason = f"No data to aggregate for {metric} ({week})."
+        return empty_response(reason, metric=metric)
+
+    if group_by is None:
+        value = float(df["value"].iloc[0])
+        n = int(df["count"].iloc[0])
+        summary = (
+            f"{agg.capitalize()} {metric} ({week}): {value:.3f} across {n} zones."
+        )
+        caveats = merge(detect_small_sample(n, threshold=5, scope=f"global {agg}"))
+    else:
+        top = df.iloc[0]
+        bottom = df.iloc[-1]
+        if len(df) == 1:
+            summary = (
+                f"{agg.capitalize()} {metric} by {group_by} ({week}): "
+                f"{top['group_value']}={float(top['value']):.3f}."
+            )
+        else:
+            summary = (
+                f"{agg.capitalize()} {metric} by {group_by} ({week}): "
+                f"top={top['group_value']} ({float(top['value']):.3f}), "
+                f"bottom={bottom['group_value']} ({float(bottom['value']):.3f})."
+            )
+        # Flag groups whose n is too small to generalise (e.g. Uruguay vs
+        # Mexico — very different sample sizes hidden behind the same
+        # aggregate).
+        caveats = merge(detect_small_groups(df, count_col="count"))
+
+    return format_response(df, summary=summary, metric=metric, caveats=caveats)

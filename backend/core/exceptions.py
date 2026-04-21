@@ -8,8 +8,12 @@ Hierarchy:
     RappiBotError              (base)
     ├── DataNotFoundError      (404)
     ├── InvalidQueryError      (422)
-    ├── LLMProviderError       (502)
-    └── ToolExecutionError     (500)
+    └── LLMProviderError       (502)
+
+Note: tool-handler failures are intentionally NOT exceptions. ``dispatch``
+in ``backend.tools.registry`` converts any handler error into a structured
+response (``metadata.error = True``) so the LLM can self-correct instead of
+crashing the turn.
 """
 
 from __future__ import annotations
@@ -29,7 +33,3 @@ class InvalidQueryError(RappiBotError):
 
 class LLMProviderError(RappiBotError):
     """Raised when the LLM API returns an error or unexpected response."""
-
-
-class ToolExecutionError(RappiBotError):
-    """Raised when a tool handler fails during execution."""

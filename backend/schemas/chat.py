@@ -3,21 +3,11 @@ Pydantic models for the chat API contract.
 
 Request:  ChatRequest   → what the client sends
 Response: ChatResponse  → what the API returns
-Internal: Message       → single turn in conversation history
 """
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, Field
-
-
-class Message(BaseModel):
-    """A single message in the conversation history."""
-
-    role: Literal["user", "assistant", "tool"]
-    content: str
 
 
 class ChatRequest(BaseModel):

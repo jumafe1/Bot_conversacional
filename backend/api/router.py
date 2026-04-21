@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from backend.api.v1 import chat, health
+from backend.api.v1 import chat, health, insights
 
 api_router = APIRouter()
 
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(chat.router, tags=["chat"])
+api_router.include_router(insights.router, tags=["insights"])

@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --background: #f7f8fa;
+  --foreground: #11141b;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Keep the assistant-ui thread from claiming more than the viewport. */
+.aui-thread-root {
+  max-height: 100%;
+}
+
+/* Tighter markdown spacing inside chat bubbles. */
+.aui-md h1,
+.aui-md h2,
+.aui-md h3 {
+  margin-top: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.aui-md table {
+  font-size: 0.875rem;
+  border-collapse: collapse;
+  margin: 0.5rem 0;
+}
+
+.aui-md th,
+.aui-md td {
+  border: 1px solid rgb(220 223 230);
+  padding: 0.25rem 0.5rem;
+}
+
+.aui-md th {
+  background: rgb(247 248 250);
+  font-weight: 600;
+  text-align: left;
+}
+
+.aui-md code {
+  background: rgb(238 240 244);
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.25rem;
+  font-size: 0.85em;
+}

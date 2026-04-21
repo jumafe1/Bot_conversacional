@@ -42,7 +42,7 @@ A natural-language interface that lets non-technical teams (Strategy, Planning &
 
 | Layer | Choice | Why |
 |---|---|---|
-| LLM | OpenAI GPT-5.2 (tool use) | Native function calling, structured outputs |
+| LLM | OpenAI GPT-5.4 mini (tool use) | Native function calling, structured outputs |
 | Orchestration | Direct API (no LangChain) | Full control, easier debugging, fewer abstractions |
 | Database | DuckDB + Parquet | Zero-infra, columnar, fast aggregations on ~millions of rows |
 | Backend | FastAPI | Async-native, Pydantic integration, OpenAPI docs for free |
@@ -79,6 +79,12 @@ make clean-data
 make run
 # → http://localhost:8000
 # → http://localhost:8000/docs  (Swagger UI)
+
+# 8. (Optional) Start the chat UI
+cd frontend
+cp .env.local.example .env.local
+make frontend-install              # one-off: npm install
+make frontend-dev                  # → http://localhost:3000
 ```
 
 ---
@@ -95,7 +101,11 @@ rappi-bot/
 │   ├── schemas/         # Pydantic request/response models
 │   ├── services/        # Business logic (bot, llm, memory)
 │   └── tools/           # LLM-callable tools (filter, compare, trend...)
-├── scripts/             # Data ingestion and EDA
+├── frontend/            # Next.js 15 + assistant-ui chat UI
+│   ├── app/             #   App Router pages (layout, home)
+│   ├── components/      #   ConversationRuntime, Thread, Suggestions, Header
+│   └── lib/             #   api client, session id, class helper
+├── scripts/             # Data ingestion, EDA, live LLM smoke test
 ├── tests/               # pytest test suite
 └── docs/                # Architecture, data quality, cost estimates
 ```
@@ -114,10 +124,6 @@ pytest -v         # verbose output
 
 ## Key Technical Decisions
 
-- **No LangChain**: Direct provider SDK calls give us full visibility into prompts, token counts, and tool call cycles. Debugging is straightforward; swapping providers means changing one service class.
-- **DuckDB over Postgres**: The dataset fits comfortably in memory. DuckDB's columnar engine handles aggregations and window functions faster than row-store for analytics workloads, with zero operational overhead.
-- **Tool-use architecture**: Each analytical capability (filter, compare, trend, aggregate) is an independent function the LLM can invoke. This keeps prompt logic minimal and makes each tool independently testable.
-- **Provider abstraction**: `llm_service.py` wraps both OpenAI and Anthropic behind a common interface. Switching providers is a single env-var change.
 
 ---
 

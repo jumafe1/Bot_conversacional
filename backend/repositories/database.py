@@ -1,25 +1,13 @@
 """
-DuckDB connection wrapper.
+DuckDB connection manager.
 
-Manages a single in-process DuckDB connection and registers
-the processed parquet files as SQL views on startup.
+Uses an in-memory DuckDB instance with views pointing to the processed parquet
+files. The views let queries use clean table names (metrics_wide, metrics_long,
+orders_wide, orders_long) instead of file paths.
 
-Views registered:
-    metrics  → data/processed/metrics.parquet
-    orders   → data/processed/orders.parquet
-    summary  → data/processed/summary.parquet
-
-Exposes:
-    get_connection() -> duckdb.DuckDBPyConnection
-    initialize()     -> None  (call once at startup)
-
-TODO:
-    1. Implement initialize(): open DuckDB connection, register parquet views.
-    2. Validate that each parquet file exists before registering; raise
-       DataNotFoundError with a helpful message if not.
-    3. Implement get_connection(): return the module-level connection instance.
-    4. Consider thread-safety: DuckDB connections are not thread-safe by default.
-       Either use connection-per-request or a connection pool.
+Exposes a module-level `db` singleton:
+    from backend.repositories.database import db
+    df = db.execute("SELECT * FROM metrics_wide WHERE COUNTRY = ?", ["CO"]).fetchdf()
 """
 
 from __future__ import annotations
@@ -27,32 +15,92 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+import duckdb
+
 from backend.core.config import settings
-from backend.core.exceptions import DataNotFoundError
 
 logger = logging.getLogger(__name__)
 
-_connection = None  # module-level singleton
+
+class Database:
+    """DuckDB in-memory connection with parquet-backed views."""
+
+    _VIEW_DEFINITIONS: dict[str, str] = {
+        "metrics_wide": "metrics_wide.parquet",
+        "metrics_long": "metrics_long.parquet",
+        "orders_wide":  "orders_wide.parquet",
+        "orders_long":  "orders_long.parquet",
+    }
+
+    def __init__(self, data_dir: Path | None = None) -> None:
+        self._data_dir = data_dir or settings.DATA_DIR
+        self._conn: duckdb.DuckDBPyConnection | None = None
+
+    # ------------------------------------------------------------------
+    # Public interface
+    # ------------------------------------------------------------------
+
+    def connect(self) -> None:
+        """Open the connection and register all parquet views. Idempotent."""
+        if self._conn is not None:
+            return
+        logger.info("Opening DuckDB in-memory connection")
+        self._conn = duckdb.connect(":memory:")
+        try:
+            self._register_views()
+        except Exception:
+            # Reset so the next call to execute() retries connect()
+            self._conn.close()
+            self._conn = None
+            raise
+
+    def execute(self, sql: str, params: list | None = None) -> duckdb.DuckDBPyConnection:
+        """Execute a parameterized SQL query.
+
+        Lazy-connects on first call so tests and scripts don't need explicit
+        connect() calls.
+
+        Returns the DuckDB connection (supports .fetchdf(), .fetchall(), .fetchone()).
+        """
+        if self._conn is None:
+            self.connect()
+        logger.debug("SQL: %s | params: %s", sql.strip()[:200], params)
+        return self._conn.execute(sql, params or [])  # type: ignore[union-attr]
+
+    def close(self) -> None:
+        """Close the connection and reset state."""
+        if self._conn is not None:
+            self._conn.close()
+            self._conn = None
+            logger.info("DuckDB connection closed")
+
+    # ------------------------------------------------------------------
+    # Private
+    # ------------------------------------------------------------------
+
+    def _register_views(self) -> None:
+        """Register one SQL view per processed parquet.
+
+        The path is interpolated directly (not via ? param) because DuckDB
+        does not support prepared parameters in CREATE VIEW statements.
+        The path comes from settings (our code, not user input) so this is safe.
+        """
+        assert self._conn is not None
+        for view_name, filename in self._VIEW_DEFINITIONS.items():
+            path = self._data_dir / filename
+            if not path.exists():
+                raise FileNotFoundError(
+                    f"Parquet file not found: {path}. "
+                    "Run `python scripts/clean_data.py` (or `make clean-data`) first."
+                )
+            # Resolve to absolute path; escape single quotes for SQL safety.
+            path_sql = str(path.resolve()).replace("'", "''")
+            self._conn.execute(
+                f"CREATE OR REPLACE VIEW {view_name} AS "
+                f"SELECT * FROM read_parquet('{path_sql}')"
+            )
+            logger.info("Registered view '%s' → %s", view_name, path.name)
 
 
-PARQUET_VIEWS: dict[str, str] = {
-    "metrics": "metrics.parquet",
-    "orders": "orders.parquet",
-    "summary": "summary.parquet",
-}
-
-
-def initialize() -> None:
-    """Open DuckDB and register parquet files as views.
-
-    TODO: implement as described in the module docstring.
-    """
-    raise NotImplementedError
-
-
-def get_connection():
-    """Return the active DuckDB connection.
-
-    TODO: raise RuntimeError if initialize() has not been called.
-    """
-    raise NotImplementedError
+# Module-level singleton — import this everywhere
+db = Database()

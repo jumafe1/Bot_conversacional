@@ -13,15 +13,20 @@ TODO:
 from __future__ import annotations
 
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 from backend.main import app
 
 
 @pytest.fixture
 async def client() -> AsyncClient:
-    """Async HTTP client for testing FastAPI endpoints."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    """Async HTTP client for testing FastAPI endpoints.
+
+    Uses ``ASGITransport`` because httpx >= 0.28 dropped the implicit
+    ``AsyncClient(app=...)`` shortcut and now requires an explicit transport.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
 
