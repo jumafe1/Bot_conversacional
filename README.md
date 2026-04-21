@@ -56,7 +56,7 @@ A natural-language interface that lets non-technical teams (Strategy, Planning &
 ```bash
 # 1. Clone and enter the project
 git clone <repo-url>
-cd rappi-bot
+cd Bot_conversacional
 
 # 2. Create virtual environment
 python -m venv .venv
@@ -92,7 +92,7 @@ make frontend-dev                  # → http://localhost:3000
 ## Project Structure
 
 ```
-rappi-bot/
+Bot_conversacional/
 ├── backend/
 │   ├── api/v1/          # HTTP endpoints (chat, health)
 │   ├── core/            # Config, logging, exceptions
