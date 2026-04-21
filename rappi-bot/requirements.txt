@@ -1,0 +1,25 @@
+# =============================================================================
+# Runtime dependencies
+# =============================================================================
+
+# Web framework
+fastapi
+uvicorn[standard]
+
+# Data validation
+pydantic
+pydantic-settings
+python-dotenv
+
+# LLM providers
+openai
+anthropic
+
+# Data layer
+duckdb
+pandas
+pyarrow
+openpyxl
+
+# Logging
+structlog

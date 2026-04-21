@@ -1,0 +1,12 @@
+# =============================================================================
+# Development-only dependencies
+# =============================================================================
+-r requirements.txt
+
+# Testing
+pytest
+pytest-asyncio
+httpx
+
+# Linting & formatting
+ruff
