@@ -123,6 +123,11 @@ function MetricSelect({
         disabled={disabled || metrics.length === 0}
         className={SELECT_CLASSES}
       >
+        {!value && (
+          <option value="" disabled>
+            Seleccioná una métrica
+          </option>
+        )}
         {!metrics.includes(value) && value && (
           <option value={value}>{value}</option>
         )}

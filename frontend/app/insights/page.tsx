@@ -53,9 +53,13 @@ export default function InsightsPage() {
     setStatus("loading");
     setError(null);
 
-    generateInsights({ refresh, signal: ac.signal })
-      .then((data) => {
-        setReport(data);
+    Promise.all([
+      generateInsights({ refresh, signal: ac.signal }),
+      getFilterOptions({ signal: ac.signal }),
+    ])
+      .then(([reportData, filterOptions]) => {
+        setReport(reportData);
+        setOptions(filterOptions);
         setStatus("ready");
       })
       .catch((err: unknown) => {
@@ -71,16 +75,6 @@ export default function InsightsPage() {
     return () => abortRef.current?.abort();
   }, [fetchReport]);
 
-  useEffect(() => {
-    const ac = new AbortController();
-    getFilterOptions({ signal: ac.signal })
-      .then(setOptions)
-      .catch(() => {
-        /* options are best-effort; UI still works with section defaults */
-      });
-    return () => ac.abort();
-  }, []);
-
   return (
     <main className="flex min-h-screen w-full flex-col bg-ink-50">
       <TopBar status={status} onRefresh={() => fetchReport(true)} />
@@ -89,7 +83,7 @@ export default function InsightsPage() {
       {status === "error" && (
         <ErrorState error={error} onRetry={() => fetchReport(true)} />
       )}
-      {status === "ready" && report && (
+      {status === "ready" && report && options && (
         <ReportView report={report} options={options} />
       )}
     </main>
@@ -230,7 +224,7 @@ function ErrorState({
 function ReportView({
   report,
   options,
-}: Readonly<{ report: InsightsReport; options: FilterOptions | null }>) {
+}: Readonly<{ report: InsightsReport; options: FilterOptions }>) {
   const generated = new Date(report.generated_at).toLocaleString("es-AR");
 
   return (
@@ -238,7 +232,11 @@ function ReportView({
       <ReportHero snapshot={report.data_snapshot} generatedAt={generated} />
       <ExecutiveSummary summary={report.executive_summary} />
       {report.sections.map((section) => (
-        <SectionCard key={section.id} section={section} options={options} />
+        <SectionCard
+          key={`${report.generated_at}-${section.id}`}
+          section={section}
+          options={options}
+        />
       ))}
     </div>
   );
@@ -302,13 +300,16 @@ const RECOMPUTE_DEBOUNCE_MS = 350;
 function initialFilters<S extends SectionId>(
   sectionId: S,
   section: InsightsSection,
-  options: FilterOptions | null,
+  options: FilterOptions,
 ): SectionFiltersMap[S] {
-  const fallbackMetric = options?.metrics?.[0] ?? "";
+  const fallbackMetric = inferMetricForSection(section, options.metrics, 0);
   const firstFinding = section.findings[0] ?? {};
   const metricFromFinding =
     typeof firstFinding.metric === "string" ? firstFinding.metric : undefined;
-  const pickMetric = () => metricFromFinding ?? fallbackMetric;
+  const pickMetric = () =>
+    metricFromFinding && options.metrics.includes(metricFromFinding)
+      ? metricFromFinding
+      : fallbackMetric;
 
   switch (sectionId) {
     case "anomalies":
@@ -329,13 +330,15 @@ function initialFilters<S extends SectionId>(
       } as SectionFiltersMap[S];
     case "correlations": {
       const a =
-        typeof firstFinding.metric_a === "string"
+        typeof firstFinding.metric_a === "string" &&
+        options.metrics.includes(firstFinding.metric_a)
           ? firstFinding.metric_a
           : fallbackMetric;
       const b =
-        typeof firstFinding.metric_b === "string"
+        typeof firstFinding.metric_b === "string" &&
+        options.metrics.includes(firstFinding.metric_b)
           ? firstFinding.metric_b
-          : options?.metrics?.[1] ?? fallbackMetric;
+          : inferSecondMetric(section, options.metrics, a);
       return {
         metric_x: a,
         metric_y: b,
@@ -351,12 +354,12 @@ function initialFilters<S extends SectionId>(
 function SectionCard({
   section,
   options,
-}: Readonly<{ section: InsightsSection; options: FilterOptions | null }>) {
+}: Readonly<{ section: InsightsSection; options: FilterOptions }>) {
   const sectionId = section.id;
 
-  // Initial filters derived from the first finding (once, on mount). We
-  // deliberately don't re-derive when ``options`` loads later because the
-  // filter values are already usable — options only populate the dropdowns.
+  // Initial filters derived from the first finding when possible. If the
+  // batch section has narrative but no findings, filters are hydrated once
+  // options arrive using the metric mentioned in that narrative.
   const [filters, setFilters] = useState<SectionFiltersMap[typeof sectionId]>(
     () => initialFilters(sectionId, section, options),
   );
@@ -386,16 +389,25 @@ function SectionCard({
 
   const recomputeAbort = useRef<AbortController | null>(null);
   const narrativeAbort = useRef<AbortController | null>(null);
-  const isInitialRender = useRef(true);
 
-  // Debounced recompute on filter change. Skips the first render so the
-  // batch-report chart is shown immediately without a wasted round trip.
+  // If the section mounted before filter options were available, the default
+  // metric may be "". Hydrate it once ``options`` arrives so the first
+  // recompute uses a real metric instead of silently no-oping.
   useEffect(() => {
-    if (isInitialRender.current) {
-      isInitialRender.current = false;
-      return;
-    }
+    if (!options) return;
+    setFilters((prev) => {
+      const next = hydrateFiltersWithOptions(sectionId, prev, options, section);
+      return next === prev ? prev : next;
+    });
+    setNarrativeFilters((prev) => {
+      const next = hydrateFiltersWithOptions(sectionId, prev, options, section);
+      return next === prev ? prev : next;
+    });
+  }, [options, section, sectionId]);
+
+  useEffect(() => {
     if (!filters || !("metric" in filters || "metric_x" in filters)) return;
+    if (!hasValidMetric(filters)) return;
 
     const timer = setTimeout(() => {
       recomputeAbort.current?.abort();
@@ -572,6 +584,79 @@ function SectionCard({
       </div>
     </section>
   );
+}
+
+function hasValidMetric(filters: SectionFiltersMap[SectionId]): boolean {
+  const f = filters as unknown as Record<string, unknown>;
+  if ("metric_x" in f && "metric_y" in f) {
+    return (
+      typeof f.metric_x === "string" &&
+      f.metric_x !== "" &&
+      typeof f.metric_y === "string" &&
+      f.metric_y !== ""
+    );
+  }
+  return typeof f.metric === "string" && f.metric !== "";
+}
+
+function hydrateFiltersWithOptions<S extends SectionId>(
+  sectionId: S,
+  current: SectionFiltersMap[S],
+  options: FilterOptions,
+  section: InsightsSection,
+): SectionFiltersMap[S] {
+  const metrics = options.metrics ?? [];
+  if (metrics.length === 0) return current;
+
+  const c = current as unknown as Record<string, unknown>;
+  if (sectionId === "correlations") {
+    const x = typeof c.metric_x === "string" ? c.metric_x : "";
+    const y = typeof c.metric_y === "string" ? c.metric_y : "";
+    const needsX = x === "";
+    const needsY = y === "";
+    if (!needsX && !needsY) return current;
+    const nextX = needsX ? inferMetricForSection(section, metrics, 0) : x;
+    return {
+      ...current,
+      metric_x: nextX,
+      metric_y: needsY ? inferSecondMetric(section, metrics, nextX) : y,
+    } as SectionFiltersMap[S];
+  }
+  const m = typeof c.metric === "string" ? c.metric : "";
+  if (m !== "") return current;
+  return {
+    ...current,
+    metric: inferMetricForSection(section, metrics, 0),
+  } as SectionFiltersMap[S];
+}
+
+function inferMetricForSection(
+  section: InsightsSection,
+  metrics: string[],
+  offset: number,
+): string {
+  const firstFinding = section.findings[0] ?? {};
+  const findingMetric =
+    offset === 0
+      ? firstFinding.metric ?? firstFinding.metric_a
+      : firstFinding.metric_b;
+  if (typeof findingMetric === "string" && metrics.includes(findingMetric)) {
+    return findingMetric;
+  }
+
+  const text = `${section.title}\n${section.narrative}\n${section.recommendation}`;
+  const mentioned = metrics.filter((metric) => text.includes(metric));
+  return mentioned[offset] ?? mentioned[0] ?? metrics[offset] ?? metrics[0] ?? "";
+}
+
+function inferSecondMetric(
+  section: InsightsSection,
+  metrics: string[],
+  firstMetric: string,
+): string {
+  const candidate = inferMetricForSection(section, metrics, 1);
+  if (candidate && candidate !== firstMetric) return candidate;
+  return metrics.find((metric) => metric !== firstMetric) ?? "";
 }
 
 function shallowEqual(a: object, b: object): boolean {
